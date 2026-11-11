@@ -18,6 +18,8 @@ const appointmentSchema = z.object({
     .transform((value) => (value ? value : null)),
 });
 
+const createAppointmentSchema = appointmentSchema.omit({ status: true });
+
 const updateAppointmentSchema = appointmentSchema
   .partial()
   .refine((value) => Object.keys(value).length > 0, {
@@ -49,21 +51,19 @@ function listAppointments() {
 }
 
 const createAppointment = db.transaction(
-  (data: z.infer<typeof appointmentSchema>) => {
+  (data: z.infer<typeof createAppointmentSchema>) => {
     const scheduledAt = Date.parse(data.scheduled_at);
 
-    if (data.status === "SCHEDULED") {
-      const scheduledAppointments = db
-        .prepare("SELECT scheduled_at FROM appointments WHERE status = 'SCHEDULED'")
-        .all() as { scheduled_at: string }[];
+    const scheduledAppointments = db
+      .prepare("SELECT scheduled_at FROM appointments WHERE status = 'SCHEDULED'")
+      .all() as { scheduled_at: string }[];
 
-      const hasConflict = scheduledAppointments.some(
-        (appointment) => Date.parse(appointment.scheduled_at) === scheduledAt
-      );
+    const hasConflict = scheduledAppointments.some(
+      (appointment) => Date.parse(appointment.scheduled_at) === scheduledAt
+    );
 
-      if (hasConflict) {
-        return null;
-      }
+    if (hasConflict) {
+      return null;
     }
 
     const result = db
@@ -78,7 +78,7 @@ const createAppointment = db.transaction(
             observations,
             created_at,
             updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+          ) VALUES (?, ?, ?, ?, 'SCHEDULED', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         `
       )
       .run(
@@ -86,7 +86,6 @@ const createAppointment = db.transaction(
         data.animal,
         data.exam_type,
         data.scheduled_at,
-        data.status,
         data.observations
       );
 
@@ -209,7 +208,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Requisição inválida" }, { status: 400 });
     }
 
-    const parsed = appointmentSchema.safeParse(body);
+    const parsed = createAppointmentSchema.safeParse(body);
 
     if (!parsed.success) {
       return NextResponse.json(
