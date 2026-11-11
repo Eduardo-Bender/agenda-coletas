@@ -5,14 +5,9 @@ veterinário. Utiliza Next.js, TypeScript, SQLite e Tailwind CSS.
 
 ## Como executar
 
-1. Recomendamos o Node.js 24.x LTS para Windows x64. O Node.js 26 também pode
-   funcionar, mas, se não houver um binário pré-compilado do `better-sqlite3`
-   para essa versão, será necessário compilá-lo.
+1. Use Node.js 22.13.0 ou mais recente. O banco usa o módulo `node:sqlite`,
+   integrado ao Node.js, sem precisar compilar uma dependência nativa.
 2. Instale as dependências: `npm install`.
-   No Windows, se a instalação precisar compilar o `better-sqlite3`, instale o
-   Visual Studio 2022 Build Tools com a carga de trabalho **Desenvolvimento para
-   desktop com C++** e um **Windows 10/11 SDK**. Depois, abra um novo terminal e
-   execute `npm install` novamente.
 3. Crie o arquivo `.env.local` a partir do exemplo. No PowerShell, execute
    `Copy-Item .env.example .env.local`. Edite o arquivo e substitua os valores
    de exemplo de `ADMIN_EMAIL`, `ADMIN_PASSWORD` e `AUTH_SECRET` pelos seus.

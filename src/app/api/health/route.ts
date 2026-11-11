@@ -2,7 +2,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCurrentUser } from "@/lib/auth";
-import db from "@/lib/db";
+import db, { withImmediateTransaction } from "@/lib/db";
 
 const appointmentSchema = z.object({
   clinic: z.string().trim().min(2, "Clínica é obrigatória e deve ter entre 2 e 120 caracteres").max(120),
@@ -50,8 +50,8 @@ function listAppointments() {
     .all() as AppointmentRecord[];
 }
 
-const createAppointment = db.transaction(
-  (data: z.infer<typeof createAppointmentSchema>) => {
+function createAppointment(data: z.infer<typeof createAppointmentSchema>) {
+  return withImmediateTransaction(() => {
     const scheduledAt = Date.parse(data.scheduled_at);
 
     const scheduledAppointments = db
@@ -92,8 +92,8 @@ const createAppointment = db.transaction(
     return db
       .prepare("SELECT * FROM appointments WHERE id = ?")
       .get(result.lastInsertRowid) as AppointmentRecord;
-  }
-);
+  });
+}
 
 type AppointmentUpdateResult =
   | { kind: "not_found" }
@@ -102,8 +102,11 @@ type AppointmentUpdateResult =
   | { kind: "conflict" }
   | { kind: "updated"; appointment: AppointmentRecord };
 
-const updateAppointment = db.transaction(
-  (id: number, data: z.infer<typeof updateAppointmentSchema>): AppointmentUpdateResult => {
+function updateAppointment(
+  id: number,
+  data: z.infer<typeof updateAppointmentSchema>
+): AppointmentUpdateResult {
+  return withImmediateTransaction(() => {
     const current = db
       .prepare("SELECT * FROM appointments WHERE id = ?")
       .get(id) as AppointmentRecord | undefined;
@@ -163,8 +166,8 @@ const updateAppointment = db.transaction(
       .get(id) as AppointmentRecord;
 
     return { kind: "updated", appointment: updated };
-  }
-);
+  });
+}
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -229,7 +232,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const created = createAppointment.immediate(data);
+    const created = createAppointment(data);
 
     if (!created) {
       return NextResponse.json(
@@ -281,7 +284,7 @@ export async function PATCH(request: Request) {
       );
     }
 
-    const result = updateAppointment.immediate(id, parsed.data);
+    const result = updateAppointment(id, parsed.data);
 
     if (result.kind === "not_found") {
       return NextResponse.json({ error: "Agendamento não encontrado." }, { status: 404 });

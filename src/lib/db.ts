@@ -1,7 +1,7 @@
 
-import Database from "better-sqlite3";
 import path from "node:path";
 import fs from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 
 // Diretório onde o banco será armazenado
 const dataDir = path.join(process.cwd(), "data");
@@ -13,17 +13,17 @@ if (!fs.existsSync(dataDir)) {
 const dbPath = path.join(dataDir, "agenda.db");
 
 // Evita criar várias conexões durante o Hot Reload do Next.js
-const globalForDb = globalThis as unknown as {
-    db: Database.Database | undefined;
+const globalForDb = globalThis as typeof globalThis & {
+    db?: DatabaseSync;
 };
 
 const db =
     globalForDb.db ??
-    new Database(dbPath);
+    new DatabaseSync(dbPath);
 
 // Configurações do SQLite
-db.pragma("journal_mode = WAL");
-db.pragma("foreign_keys = ON");
+db.exec("PRAGMA journal_mode = WAL");
+db.exec("PRAGMA foreign_keys = ON");
 
 // Criação das tabelas
 db.exec(`
@@ -50,6 +50,27 @@ db.exec(`
 
 if (process.env.NODE_ENV !== "production") {
     globalForDb.db = db;
+}
+
+export function withImmediateTransaction<T>(operation: () => T): T {
+    db.exec("BEGIN IMMEDIATE");
+
+    try {
+        const result = operation();
+        db.exec("COMMIT");
+        return result;
+    } catch (error) {
+        try {
+            db.exec("ROLLBACK");
+        } catch (rollbackError) {
+            throw new AggregateError(
+                [error, rollbackError],
+                "A transação falhou e não foi possível revertê-la."
+            );
+        }
+
+        throw error;
+    }
 }
 
 export default db;
