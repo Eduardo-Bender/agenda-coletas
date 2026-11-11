@@ -17,24 +17,36 @@ type Appointment = {
   updated_at: string;
 };
 
-const initialForm = {
-  clinic: "",
-  animal: "",
-  exam_type: "",
-  scheduled_at: getNextDateTime(),
-  status: "SCHEDULED" as AppointmentStatus,
-  observations: "",
-};
+function createInitialForm() {
+  return {
+    clinic: "",
+    animal: "",
+    exam_type: "",
+    scheduled_at: getNextDateTime(),
+    status: "SCHEDULED" as AppointmentStatus,
+    observations: "",
+  };
+}
 
 function getNextDateTime() {
   const now = new Date();
   now.setMinutes(now.getMinutes() + 30);
   now.setSeconds(0, 0);
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(
-    now.getDate()
-  ).padStart(2, "0")}T${String(now.getHours()).padStart(2, "0")}:${String(
-    now.getMinutes()
-  ).padStart(2, "0")}`;
+  return toLocalDateTimeInput(now);
+}
+
+function getCurrentDateTime() {
+  const now = new Date();
+  if (now.getSeconds() > 0 || now.getMilliseconds() > 0) {
+    now.setMinutes(now.getMinutes() + 1);
+  }
+  now.setSeconds(0, 0);
+  return toLocalDateTimeInput(now);
+}
+
+function toLocalDateTimeInput(date: Date) {
+  const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return localDate.toISOString().slice(0, 16);
 }
 
 function formatDate(value: string) {
@@ -47,7 +59,7 @@ function formatDate(value: string) {
 export default function Home() {
   const router = useRouter();
   const [appointments, setAppointments] = useState<Appointment[]>([]);
-  const [form, setForm] = useState(initialForm);
+  const [form, setForm] = useState(createInitialForm);
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(true);
 
@@ -114,7 +126,11 @@ export default function Home() {
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ mode: "appointments", ...form }),
+      body: JSON.stringify({
+        mode: "appointments",
+        ...form,
+        scheduled_at: new Date(form.scheduled_at).toISOString(),
+      }),
     });
 
     const data = await response.json();
@@ -124,7 +140,7 @@ export default function Home() {
       return;
     }
 
-    setForm({ ...initialForm, scheduled_at: getNextDateTime() });
+    setForm(createInitialForm());
     await loadAppointments();
   }
 
@@ -245,6 +261,7 @@ export default function Home() {
               <input
                 required
                 type="datetime-local"
+                min={getCurrentDateTime()}
                 value={form.scheduled_at}
                 onChange={(event) => setForm({ ...form, scheduled_at: event.target.value })}
                 className="w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2.5 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200"

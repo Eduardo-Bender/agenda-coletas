@@ -8,12 +8,7 @@ const appointmentSchema = z.object({
   clinic: z.string().trim().min(2, "Clínica é obrigatória").max(120),
   animal: z.string().trim().min(2, "Animal é obrigatório").max(120),
   exam_type: z.string().trim().min(2, "Tipo de exame é obrigatório").max(120),
-  scheduled_at: z
-    .string()
-    .min(1, "Data da coleta é obrigatória")
-    .refine((value) => !Number.isNaN(Date.parse(value)), {
-      message: "Data da coleta inválida",
-    }),
+  scheduled_at: z.iso.datetime({ offset: true }),
   status: z.enum(["SCHEDULED", "COLLECTED", "CANCELLED"]).default("SCHEDULED"),
   observations: z
     .string()
@@ -52,6 +47,54 @@ function listAppointments() {
     )
     .all() as AppointmentRecord[];
 }
+
+const createAppointment = db.transaction(
+  (data: z.infer<typeof appointmentSchema>) => {
+    const scheduledAt = Date.parse(data.scheduled_at);
+
+    if (data.status === "SCHEDULED") {
+      const scheduledAppointments = db
+        .prepare("SELECT scheduled_at FROM appointments WHERE status = 'SCHEDULED'")
+        .all() as { scheduled_at: string }[];
+
+      const hasConflict = scheduledAppointments.some(
+        (appointment) => Date.parse(appointment.scheduled_at) === scheduledAt
+      );
+
+      if (hasConflict) {
+        return null;
+      }
+    }
+
+    const result = db
+      .prepare(
+        `
+          INSERT INTO appointments (
+            clinic,
+            animal,
+            exam_type,
+            scheduled_at,
+            status,
+            observations,
+            created_at,
+            updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        `
+      )
+      .run(
+        data.clinic,
+        data.animal,
+        data.exam_type,
+        data.scheduled_at,
+        data.status,
+        data.observations
+      );
+
+    return db
+      .prepare("SELECT * FROM appointments WHERE id = ?")
+      .get(result.lastInsertRowid) as AppointmentRecord;
+  }
+);
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -107,34 +150,23 @@ export async function POST(request: Request) {
     }
 
     const data = parsed.data;
+    const scheduledAt = Date.parse(data.scheduled_at);
 
-    const result = db
-      .prepare(
-        `
-          INSERT INTO appointments (
-            clinic,
-            animal,
-            exam_type,
-            scheduled_at,
-            status,
-            observations,
-            created_at,
-            updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-        `
-      )
-      .run(
-        data.clinic,
-        data.animal,
-        data.exam_type,
-        data.scheduled_at,
-        data.status,
-        data.observations
+    if (scheduledAt <= Date.now()) {
+      return NextResponse.json(
+        { error: "A data e o horário da coleta devem estar no futuro." },
+        { status: 400 }
       );
+    }
 
-    const created = db
-      .prepare("SELECT * FROM appointments WHERE id = ?")
-      .get(result.lastInsertRowid) as AppointmentRecord;
+    const created = createAppointment.immediate(data);
+
+    if (!created) {
+      return NextResponse.json(
+        { error: "Já existe um agendamento para esse horário." },
+        { status: 409 }
+      );
+    }
 
     return NextResponse.json(created, { status: 201 });
   } catch (error) {
