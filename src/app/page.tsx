@@ -12,9 +12,10 @@ export default function HomePage() {
 }
 
 async function ProtectedAgenda() {
-  if (!(await getCurrentUser())) {
+  const user = await getCurrentUser();
+  if (!user) {
     redirect("/login");
   }
 
-  return <AgendaClient />;
+  return <AgendaClient accountEmail={user.email} />;
 }

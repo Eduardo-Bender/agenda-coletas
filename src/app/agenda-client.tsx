@@ -17,6 +17,8 @@ type Appointment = {
   updated_at: string;
 };
 
+type StatusFilter = "ALL" | AppointmentStatus;
+
 function createInitialForm() {
   return {
     clinic: "",
@@ -56,9 +58,19 @@ function formatDate(value: string) {
   });
 }
 
-export default function Home() {
+function getLocalDate(value: string) {
+  const date = new Date(value);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
+    date.getDate()
+  ).padStart(2, "0")}`;
+}
+
+export default function Home({ accountEmail }: { accountEmail: string }) {
   const router = useRouter();
   const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
+  const [clinicFilter, setClinicFilter] = useState("");
+  const [dateFilter, setDateFilter] = useState("");
   const [form, setForm] = useState(createInitialForm);
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(true);
@@ -178,43 +190,48 @@ export default function Home() {
     await loadAppointments();
   }
 
-  const totalSCHEDULED = appointments.filter((item) => item.status === "SCHEDULED").length;
-  const totalCOLLECTED = appointments.filter((item) => item.status === "COLLECTED").length;
-  const totalCANCELLED = appointments.filter((item) => item.status === "CANCELLED").length;
+  const filteredAppointments = appointments.filter((appointment) => {
+    const matchesStatus = statusFilter === "ALL" || appointment.status === statusFilter;
+    const matchesClinic = !clinicFilter || appointment.clinic === clinicFilter;
+    const matchesDate =
+      !dateFilter || getLocalDate(appointment.scheduled_at) === dateFilter;
+
+    return matchesStatus && matchesClinic && matchesDate;
+  });
+
+  const clinics = [...new Set(appointments.map((appointment) => appointment.clinic))].sort(
+    (first, second) => first.localeCompare(second, "pt-BR")
+  );
+
+  const statusCounts = {
+    ALL: appointments.length,
+    SCHEDULED: appointments.filter((item) => item.status === "SCHEDULED").length,
+    COLLECTED: appointments.filter((item) => item.status === "COLLECTED").length,
+    CANCELLED: appointments.filter((item) => item.status === "CANCELLED").length,
+  };
 
   return (
-    <main className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-4 py-10 sm:px-6 lg:px-8">
-      <header className="rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-500 p-6 text-white shadow-lg shadow-emerald-950/20">
-        <div className="flex flex-wrap items-start justify-between gap-4">
+    <div className="min-h-screen">
+      <header className="w-full bg-gradient-to-r from-emerald-700 to-teal-600 text-white shadow-lg shadow-emerald-950/20">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-4 py-5 sm:px-6 lg:px-8">
           <div>
-            <p className="text-sm font-medium uppercase tracking-[0.2em] text-emerald-100">Agenda de coletas</p>
-            <h1 className="mt-2 text-3xl font-bold sm:text-4xl">Controle de coletas veterinárias</h1>
+            <h1 className="text-2xl font-bold sm:text-3xl">Agenda de Coletas</h1>
+            <p className="mt-1 text-sm text-emerald-100">Controle de coletas veterinárias</p>
           </div>
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="rounded-xl border border-white/40 px-4 py-2 text-sm font-medium text-white transition hover:bg-white/10"
-          >
-            Sair
-          </button>
+          <div className="flex items-center gap-3">
+            <span className="hidden text-sm text-emerald-50 sm:inline">{accountEmail}</span>
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="rounded-xl border border-white/40 px-4 py-2 text-sm font-medium text-white transition hover:bg-white/10"
+            >
+              Sair
+            </button>
+          </div>
         </div>
       </header>
 
-      <section className="grid gap-4 md:grid-cols-3">
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <p className="text-sm text-slate-500">Agendadas</p>
-          <p className="mt-2 text-3xl font-bold text-slate-900">{totalSCHEDULED}</p>
-        </div>
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <p className="text-sm text-slate-500">Coletadas</p>
-          <p className="mt-2 text-3xl font-bold text-emerald-600">{totalCOLLECTED}</p>
-        </div>
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <p className="text-sm text-slate-500">Canceladas</p>
-          <p className="mt-2 text-3xl font-bold text-red-500">{totalCANCELLED}</p>
-        </div>
-      </section>
-
+      <main className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-4 py-8 sm:px-6 lg:px-8">
       <section className="grid gap-8 lg:grid-cols-[420px_1fr]">
         <form
           onSubmit={handleSubmit}
@@ -314,10 +331,88 @@ export default function Home() {
 
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex items-center justify-between gap-4">
-            <h2 className="text-xl font-semibold text-slate-900">Coletas agendadas</h2>
+            <h2 className="text-xl font-semibold text-slate-900">Agendamentos</h2>
             <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">
-              {appointments.length} itens
+              {filteredAppointments.length} itens
             </span>
+          </div>
+
+          <div className="mt-5 space-y-4">
+            <div className="flex flex-wrap gap-2" aria-label="Filtrar por status">
+              {(
+                [
+                  ["ALL", "Todos"],
+                  ["SCHEDULED", "Agendadas"],
+                  ["COLLECTED", "Coletadas"],
+                  ["CANCELLED", "Canceladas"],
+                ] as const
+              ).map(([status, label]) => (
+                <button
+                  key={status}
+                  type="button"
+                  aria-pressed={statusFilter === status}
+                  onClick={() => setStatusFilter(status)}
+                  className={`rounded-full border px-3 py-1.5 text-sm font-medium transition ${
+                    statusFilter === status
+                      ? "border-emerald-700 bg-emerald-700 text-white"
+                      : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                  }`}
+                >
+                  {label} ({statusCounts[status]})
+                </button>
+              ))}
+            </div>
+
+            <div className="flex flex-wrap items-end gap-3">
+              <div>
+                <label htmlFor="filter-date" className="mb-1 block text-sm font-medium text-slate-700">
+                  Filtrar por data
+                </label>
+                <input
+                  id="filter-date"
+                  type="date"
+                  value={dateFilter}
+                  onChange={(event) => setDateFilter(event.target.value)}
+                  className="rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200"
+                />
+              </div>
+              <div>
+                <label htmlFor="filter-clinic" className="mb-1 block text-sm font-medium text-slate-700">
+                  Filtrar por clínica
+                </label>
+                <select
+                  id="filter-clinic"
+                  value={clinicFilter}
+                  onChange={(event) => setClinicFilter(event.target.value)}
+                  className="min-w-52 rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200"
+                >
+                  <option value="">Todas as clínicas</option>
+                  {clinics.map((clinic) => (
+                    <option key={clinic} value={clinic}>
+                      {clinic}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {dateFilter ? (
+                <button
+                  type="button"
+                  onClick={() => setDateFilter("")}
+                  className="rounded-xl px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
+                >
+                  Limpar data
+                </button>
+              ) : null}
+              {clinicFilter ? (
+                <button
+                  type="button"
+                  onClick={() => setClinicFilter("")}
+                  className="rounded-xl px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
+                >
+                  Limpar clínica
+                </button>
+              ) : null}
+            </div>
           </div>
 
           {isLoading ? (
@@ -328,17 +423,49 @@ export default function Home() {
             <div className="mt-6 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-slate-600">
               Nenhuma coleta cadastrada.
             </div>
+          ) : filteredAppointments.length === 0 ? (
+            <div className="mt-6 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-slate-600">
+              Nenhum agendamento corresponde aos filtros.
+            </div>
           ) : (
             <div className="mt-6 space-y-4">
-              {appointments.map((appointment) => (
+              {filteredAppointments.map((appointment) => (
                 <article
                   key={appointment.id}
-                  className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                  className={`relative rounded-2xl border p-4 ${
+                    appointment.status === "SCHEDULED"
+                      ? "border-slate-200 bg-slate-50"
+                      : appointment.status === "CANCELLED"
+                        ? "border-red-200 bg-red-50"
+                        : "border-green-200 bg-green-50"
+                  }`}
                 >
-                  <div className="flex flex-wrap items-start justify-between gap-3">
+                  <button
+                    type="button"
+                    onClick={() => handleDelete(appointment.id)}
+                    aria-label={`Excluir agendamento de ${appointment.animal}`}
+                    title="Excluir agendamento"
+                    className="absolute right-3 top-3 rounded-lg p-2 text-slate-500 transition hover:bg-red-100 hover:text-red-700 focus:outline-none focus:ring-2 focus:ring-red-300"
+                  >
+                    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 7h16M10 11v6m4-6v6M5.5 7l1 13h11l1-13M9 7V4h6v3" />
+                    </svg>
+                  </button>
+
+                  <div
+                    className={`flex flex-wrap items-start justify-between gap-3 pr-10 ${
+                      appointment.status === "SCHEDULED" ? "" : "text-slate-500"
+                    }`}
+                  >
                     <div>
-                      <p className="text-lg font-semibold text-slate-900">{appointment.animal}</p>
-                      <p className="text-sm text-slate-600">{appointment.clinic}</p>
+                      <p
+                        className={`text-lg font-semibold ${
+                          appointment.status === "SCHEDULED" ? "text-slate-900" : "text-slate-500"
+                        }`}
+                      >
+                        {appointment.animal}
+                      </p>
+                      <p className="text-sm">{appointment.clinic}</p>
                     </div>
                     <span
                       className={
@@ -357,7 +484,11 @@ export default function Home() {
                     </span>
                   </div>
 
-                  <div className="mt-3 space-y-1 text-sm text-slate-600">
+                  <div
+                    className={`mt-3 space-y-1 text-sm ${
+                      appointment.status === "SCHEDULED" ? "text-slate-600" : "text-slate-500"
+                    }`}
+                  >
                     <p>
                       <span className="font-medium">Exame:</span> {appointment.exam_type}
                     </p>
@@ -371,35 +502,31 @@ export default function Home() {
                     ) : null}
                   </div>
 
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleStatusChange(appointment.id, "COLLECTED")}
-                      className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700"
-                    >
-                      Coletada
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleStatusChange(appointment.id, "CANCELLED")}
-                      className="rounded-lg bg-red-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-600"
-                    >
-                      Cancelar
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDelete(appointment.id)}
-                      className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100"
-                    >
-                      Excluir
-                    </button>
-                  </div>
+                  {appointment.status === "SCHEDULED" ? (
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleStatusChange(appointment.id, "COLLECTED")}
+                        className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700"
+                      >
+                        Marcar como coletada
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleStatusChange(appointment.id, "CANCELLED")}
+                        className="rounded-lg bg-red-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-600"
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+                  ) : null}
                 </article>
               ))}
             </div>
           )}
         </div>
       </section>
-    </main>
+      </main>
+    </div>
   );
 }

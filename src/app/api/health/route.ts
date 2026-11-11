@@ -5,9 +5,9 @@ import { getCurrentUser } from "@/lib/auth";
 import db from "@/lib/db";
 
 const appointmentSchema = z.object({
-  clinic: z.string().trim().min(2, "Clínica é obrigatória").max(120),
-  animal: z.string().trim().min(2, "Animal é obrigatório").max(120),
-  exam_type: z.string().trim().min(2, "Tipo de exame é obrigatório").max(120),
+  clinic: z.string().trim().min(2, "Clínica é obrigatória e deve ter entre 2 e 120 caracteres").max(120),
+  animal: z.string().trim().min(2, "Animal é obrigatório e deve ter entre 2 e 120 caracteres").max(120),
+  exam_type: z.string().trim().min(2, "Tipo de exame é obrigatório e deve ter entre 2 e 120 caracteres").max(120),
   scheduled_at: z.iso.datetime({ offset: true }),
   status: z.enum(["SCHEDULED", "COLLECTED", "CANCELLED"]).default("SCHEDULED"),
   observations: z
@@ -93,6 +93,77 @@ const createAppointment = db.transaction(
     return db
       .prepare("SELECT * FROM appointments WHERE id = ?")
       .get(result.lastInsertRowid) as AppointmentRecord;
+  }
+);
+
+type AppointmentUpdateResult =
+  | { kind: "not_found" }
+  | { kind: "terminal_status" }
+  | { kind: "past_date" }
+  | { kind: "conflict" }
+  | { kind: "updated"; appointment: AppointmentRecord };
+
+const updateAppointment = db.transaction(
+  (id: number, data: z.infer<typeof updateAppointmentSchema>): AppointmentUpdateResult => {
+    const current = db
+      .prepare("SELECT * FROM appointments WHERE id = ?")
+      .get(id) as AppointmentRecord | undefined;
+
+    if (!current) {
+      return { kind: "not_found" };
+    }
+
+    if (
+      current.status !== "SCHEDULED" &&
+      data.status !== undefined &&
+      data.status !== current.status
+    ) {
+      return { kind: "terminal_status" };
+    }
+
+    const nextStatus = data.status ?? current.status;
+    const nextScheduledAt = data.scheduled_at ?? current.scheduled_at;
+    const nextTimestamp = Date.parse(nextScheduledAt);
+
+    if (nextStatus === "SCHEDULED" && nextTimestamp <= Date.now()) {
+      return { kind: "past_date" };
+    }
+
+    if (nextStatus === "SCHEDULED") {
+      const scheduledAppointments = db
+        .prepare(
+          "SELECT id, scheduled_at FROM appointments WHERE status = 'SCHEDULED' AND id != ?"
+        )
+        .all(id) as { id: number; scheduled_at: string }[];
+
+      const hasConflict = scheduledAppointments.some(
+        (appointment) => Date.parse(appointment.scheduled_at) === nextTimestamp
+      );
+
+      if (hasConflict) {
+        return { kind: "conflict" };
+      }
+    }
+
+    const fields = Object.entries(data).filter(([, value]) => value !== undefined);
+    if (fields.length > 0) {
+      const sets = fields.map(([key]) => `${key} = ?`);
+      const values = fields.map(([, value]) => value);
+
+      db.prepare(
+        `
+          UPDATE appointments
+          SET ${sets.join(", ")}, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `
+      ).run(...values, id);
+    }
+
+    const updated = db
+      .prepare("SELECT * FROM appointments WHERE id = ?")
+      .get(id) as AppointmentRecord;
+
+    return { kind: "updated", appointment: updated };
   }
 );
 
@@ -211,29 +282,34 @@ export async function PATCH(request: Request) {
       );
     }
 
-    const data = parsed.data;
-    const fields = Object.entries(data).filter(([, value]) => value !== undefined);
+    const result = updateAppointment.immediate(id, parsed.data);
 
-    if (fields.length === 0) {
-      return NextResponse.json({ error: "Informe ao menos um campo para atualizar." }, { status: 400 });
+    if (result.kind === "not_found") {
+      return NextResponse.json({ error: "Agendamento não encontrado." }, { status: 404 });
     }
 
-    const sets = fields.map(([key]) => `${key} = ?`);
-    const values = fields.map(([, value]) => value);
+    if (result.kind === "terminal_status") {
+      return NextResponse.json(
+        { error: "Agendamentos coletados ou cancelados não podem voltar a outro status." },
+        { status: 409 }
+      );
+    }
 
-    db.prepare(
-      `
-        UPDATE appointments
-        SET ${sets.join(", ")}, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `
-    ).run(...values, id);
+    if (result.kind === "past_date") {
+      return NextResponse.json(
+        { error: "A data e o horário da coleta devem estar no futuro." },
+        { status: 400 }
+      );
+    }
 
-    const updated = db
-      .prepare("SELECT * FROM appointments WHERE id = ?")
-      .get(id) as AppointmentRecord;
+    if (result.kind === "conflict") {
+      return NextResponse.json(
+        { error: "Já existe um agendamento para esse horário." },
+        { status: 409 }
+      );
+    }
 
-    return NextResponse.json(updated);
+    return NextResponse.json(result.appointment);
   } catch (error) {
     console.error("Erro ao atualizar agendamento", error);
 
